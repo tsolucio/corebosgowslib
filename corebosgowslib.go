@@ -42,12 +42,21 @@ type cbConnectionType struct {
 	userid      string
 }
 
-var cbConnection cbConnectionType
 var cbURL = "/webservice.php"
 var netClient = &http.Client{
 	Timeout: time.Second * 10,
 }
-var queryRestulColumns = make(map[int]string)
+
+type cbContext struct {
+	cbConnection       cbConnectionType
+	queryResultColumns map[int]string
+}
+
+func GetCbContext() *cbContext {
+	return &cbContext{
+		queryResultColumns: make(map[int]string),
+	}
+}
 
 // SetURL of the coreBOS application you want to connect to
 func SetURL(cburl string) {
@@ -58,17 +67,17 @@ func SetURL(cburl string) {
 	}
 }
 
-func doChallenge(username string) (bool, error) {
+func (cbCtx *cbContext) doChallenge(username string) (bool, error) {
 	v := url.Values{
 		"operation": {"getchallenge"},
 		"username":  {username},
 	}
-	_, dat, e := docbCall("GET", v)
+	_, dat, e := cbCtx.docbCall("GET", v)
 	if e == nil && dat["success"] == true {
 		rdo := dat["result"].(map[string]interface{})
-		cbConnection.servertime = rdo["serverTime"].(float64)
-		cbConnection.expiretime = rdo["expireTime"].(string)
-		cbConnection.token = rdo["token"].(string)
+		cbCtx.cbConnection.servertime = rdo["serverTime"].(float64)
+		cbCtx.cbConnection.expiretime = rdo["expireTime"].(string)
+		cbCtx.cbConnection.token = rdo["token"].(string)
 		return true, nil
 	}
 	return false, e
@@ -76,8 +85,8 @@ func doChallenge(username string) (bool, error) {
 
 // DoLogin connects to coreBOS and tries to validate the given user.
 // true or false will be returned depending on the result of the validation
-func DoLogin(username string, userAccesskey string, withpassword bool) (bool, error) {
-	dc, err := doChallenge(username)
+func (cbCtx *cbContext) DoLogin(username string, userAccesskey string, withpassword bool) (bool, error) {
+	dc, err := cbCtx.doChallenge(username)
 	if dc == false {
 		return false, err
 	}
@@ -86,17 +95,17 @@ func DoLogin(username string, userAccesskey string, withpassword bool) (bool, er
 		"username":  {username},
 	}
 	if withpassword == true {
-		v.Set("accessKey", cbConnection.token+userAccesskey)
+		v.Set("accessKey", cbCtx.cbConnection.token+userAccesskey)
 	} else {
-		v.Set("accessKey", getMD5Hash(cbConnection.token+userAccesskey))
+		v.Set("accessKey", getMD5Hash(cbCtx.cbConnection.token+userAccesskey))
 	}
-	_, dat, e := docbCall("POST", v)
+	_, dat, e := cbCtx.docbCall("POST", v)
 	if e == nil && dat["success"] == true {
 		rdo := dat["result"].(map[string]interface{})
-		cbConnection.serviceuser = username
-		cbConnection.servicekey = userAccesskey
-		cbConnection.sessionid = rdo["sessionName"].(string)
-		cbConnection.userid = rdo["userId"].(string)
+		cbCtx.cbConnection.serviceuser = username
+		cbCtx.cbConnection.servicekey = userAccesskey
+		cbCtx.cbConnection.sessionid = rdo["sessionName"].(string)
+		cbCtx.cbConnection.userid = rdo["userId"].(string)
 		return true, nil
 	}
 	if e == nil {
@@ -108,12 +117,12 @@ func DoLogin(username string, userAccesskey string, withpassword bool) (bool, er
 
 // DoLogout disconnects from coreBOS.
 // returns true or false depending on the result
-func DoLogout() (bool, error) {
+func (cbCtx *cbContext) DoLogout() (bool, error) {
 	v := url.Values{
 		"operation":   {"logout"},
-		"sessionName": {cbConnection.sessionid},
+		"sessionName": {cbCtx.cbConnection.sessionid},
 	}
-	_, dat, e := docbCall("POST", v)
+	_, dat, e := cbCtx.docbCall("POST", v)
 	if e == nil && dat["success"] == true {
 		return true, nil
 	}
@@ -126,25 +135,25 @@ func DoLogout() (bool, error) {
 
 // DoQuery retrieves records using a specilized query language
 // returns the set of records and columsn obtained from the query
-func DoQuery(query string) (interface{}, error) {
+func (cbCtx *cbContext) DoQuery(query string) (interface{}, error) {
 	// query must end in ; so we make sure
 	q := strings.Trim(query, " ;") + ";"
 	v := url.Values{
 		"operation":   {"query"},
-		"sessionName": {cbConnection.sessionid},
+		"sessionName": {cbCtx.cbConnection.sessionid},
 		"query":       {q},
 	}
-	_, dat, e := docbCall("GET", v)
+	_, dat, e := cbCtx.docbCall("GET", v)
 	if e == nil && dat["success"] == true {
 		rdos := dat["result"].([]interface{})
 		if len(rdos) > 0 {
 			idx := 0
 			for col := range rdos[0].(map[string]interface{}) {
-				queryRestulColumns[idx] = col
+				cbCtx.queryResultColumns[idx] = col
 				idx++
 			}
 		} else {
-			queryRestulColumns = make(map[int]string)
+			cbCtx.queryResultColumns = make(map[int]string)
 		}
 		return dat["result"], nil
 	}
@@ -157,21 +166,21 @@ func DoQuery(query string) (interface{}, error) {
 }
 
 // GetResultColumns returns the column names of the last query
-func GetResultColumns() map[int]string {
-	return queryRestulColumns
+func (cbCtx *cbContext) GetResultColumns() map[int]string {
+	return cbCtx.queryResultColumns
 }
 
 // DoListTypes returns a list of available Modules for the connected user
 // filtered by those that contain a field of the given type(s). If no type is
 // given all accessible modules will be returned
-func DoListTypes(fieldTypeList []string) (map[string]string, error) {
+func (cbCtx *cbContext) DoListTypes(fieldTypeList []string) (map[string]string, error) {
 	ftl, _ := json.Marshal(fieldTypeList)
 	v := url.Values{
 		"operation":     {"listtypes"},
-		"sessionName":   {cbConnection.sessionid},
+		"sessionName":   {cbCtx.cbConnection.sessionid},
 		"fieldTypeList": {string(ftl)},
 	}
-	_, dat, e := docbCall("GET", v)
+	_, dat, e := cbCtx.docbCall("GET", v)
 	if e == nil && dat["success"] == true {
 		rdos := dat["result"].(map[string]interface{})
 		types := make(map[string]string)
@@ -190,13 +199,13 @@ func DoListTypes(fieldTypeList []string) (map[string]string, error) {
 }
 
 // DoDescribe gets all the details of a Module's permissions and fields
-func DoDescribe(module string) (map[string]interface{}, error) {
+func (cbCtx *cbContext) DoDescribe(module string) (map[string]interface{}, error) {
 	v := url.Values{
 		"operation":   {"describe"},
-		"sessionName": {cbConnection.sessionid},
+		"sessionName": {cbCtx.cbConnection.sessionid},
 		"elementType": {module},
 	}
-	_, dat, e := docbCall("GET", v)
+	_, dat, e := cbCtx.docbCall("GET", v)
 	if e == nil && dat["success"] == true {
 		return dat["result"].(map[string]interface{}), nil
 	}
@@ -209,13 +218,13 @@ func DoDescribe(module string) (map[string]interface{}, error) {
 }
 
 // DoRetrieve details of a record.
-func DoRetrieve(record string) (map[string]interface{}, error) {
+func (cbCtx *cbContext) DoRetrieve(record string) (map[string]interface{}, error) {
 	v := url.Values{
 		"operation":   {"retrieve"},
-		"sessionName": {cbConnection.sessionid},
+		"sessionName": {cbCtx.cbConnection.sessionid},
 		"id":          {record},
 	}
-	_, dat, e := docbCall("GET", v)
+	_, dat, e := cbCtx.docbCall("GET", v)
 	if e == nil && dat["success"] == true {
 		return dat["result"].(map[string]interface{}), nil
 	}
@@ -228,20 +237,20 @@ func DoRetrieve(record string) (map[string]interface{}, error) {
 }
 
 // DoCreate adds new records to the application
-func DoCreate(module string, valuemap map[string]interface{}) (map[string]interface{}, error) {
+func (cbCtx *cbContext) DoCreate(module string, valuemap map[string]interface{}) (map[string]interface{}, error) {
 	// Assign record to logged in user if not specified
 	_, exists := valuemap["assigned_user_id"]
 	if exists == false {
-		valuemap["assigned_user_id"] = cbConnection.userid
+		valuemap["assigned_user_id"] = cbCtx.cbConnection.userid
 	}
 	vals, _ := json.Marshal(valuemap)
 	v := url.Values{
 		"operation":   {"create"},
-		"sessionName": {cbConnection.sessionid},
+		"sessionName": {cbCtx.cbConnection.sessionid},
 		"elementType": {module},
 		"element":     {string(vals)},
 	}
-	_, dat, e := docbCall("POST", v)
+	_, dat, e := cbCtx.docbCall("POST", v)
 	if e == nil && dat["success"] == true {
 		return dat["result"].(map[string]interface{}), nil
 	}
@@ -255,20 +264,20 @@ func DoCreate(module string, valuemap map[string]interface{}) (map[string]interf
 
 // DoUpdate updates the given record with the new values.
 // ALL mandatory fields MUST be present
-func DoUpdate(module string, valuemap map[string]interface{}) (map[string]interface{}, error) {
+func (cbCtx *cbContext) DoUpdate(module string, valuemap map[string]interface{}) (map[string]interface{}, error) {
 	// Assign record to logged in user if not specified
 	_, exists := valuemap["assigned_user_id"]
 	if exists == false {
-		valuemap["assigned_user_id"] = cbConnection.userid
+		valuemap["assigned_user_id"] = cbCtx.cbConnection.userid
 	}
 	vals, _ := json.Marshal(valuemap)
 	v := url.Values{
 		"operation":   {"update"},
-		"sessionName": {cbConnection.sessionid},
+		"sessionName": {cbCtx.cbConnection.sessionid},
 		"elementType": {module},
 		"element":     {string(vals)},
 	}
-	_, dat, e := docbCall("POST", v)
+	_, dat, e := cbCtx.docbCall("POST", v)
 	if e == nil && dat["success"] == true {
 		return dat["result"].(map[string]interface{}), nil
 	}
@@ -282,20 +291,20 @@ func DoUpdate(module string, valuemap map[string]interface{}) (map[string]interf
 
 // DoRevise updates the given record with the new values.
 // mandatory fields do not have to be present
-func DoRevise(module string, valuemap map[string]interface{}) (map[string]interface{}, error) {
+func (cbCtx *cbContext) DoRevise(module string, valuemap map[string]interface{}) (map[string]interface{}, error) {
 	// Assign record to logged in user if not specified
 	_, exists := valuemap["assigned_user_id"]
 	if exists == false {
-		valuemap["assigned_user_id"] = cbConnection.userid
+		valuemap["assigned_user_id"] = cbCtx.cbConnection.userid
 	}
 	vals, _ := json.Marshal(valuemap)
 	v := url.Values{
 		"operation":   {"revise"},
-		"sessionName": {cbConnection.sessionid},
+		"sessionName": {cbCtx.cbConnection.sessionid},
 		"elementType": {module},
 		"element":     {string(vals)},
 	}
-	_, dat, e := docbCall("POST", v)
+	_, dat, e := cbCtx.docbCall("POST", v)
 	if e == nil && dat["success"] == true {
 		return dat["result"].(map[string]interface{}), nil
 	}
@@ -308,13 +317,13 @@ func DoRevise(module string, valuemap map[string]interface{}) (map[string]interf
 }
 
 // DoDelete eliminates the record with the given ID
-func DoDelete(record string) (bool, error) {
+func (cbCtx *cbContext) DoDelete(record string) (bool, error) {
 	v := url.Values{
 		"operation":   {"delete"},
-		"sessionName": {cbConnection.sessionid},
+		"sessionName": {cbCtx.cbConnection.sessionid},
 		"id":          {record},
 	}
-	_, dat, e := docbCall("POST", v)
+	_, dat, e := cbCtx.docbCall("POST", v)
 	if e == nil && dat["success"] == true {
 		rdo := dat["result"].(map[string]interface{})
 		if rdo["status"].(string) == "successful" {
@@ -334,17 +343,17 @@ func DoDelete(record string) (bool, error) {
 // param String method Name of the webservice to invoke
 // param Object type null or parameter values to method
 // param String POST/GET
-func DoInvoke(method string, params map[string]interface{}, typeofcall string) (map[string]interface{}, error) {
+func (cbCtx *cbContext) DoInvoke(method string, params map[string]interface{}, typeofcall string) (map[string]interface{}, error) {
 	v := url.Values{
 		"operation":   {method},
-		"sessionName": {cbConnection.sessionid},
+		"sessionName": {cbCtx.cbConnection.sessionid},
 	}
 	for idx, val := range params {
 		if v.Get(idx) == "" {
 			v.Set(idx, val.(string))
 		}
 	}
-	_, dat, e := docbCall(typeofcall, v)
+	_, dat, e := cbCtx.docbCall(typeofcall, v)
 	if e == nil && dat["success"] == true {
 		return dat["result"].(map[string]interface{}), nil
 	}
@@ -357,17 +366,17 @@ func DoInvoke(method string, params map[string]interface{}, typeofcall string) (
 }
 
 // DoGetRelatedRecords will retrieve all related records of the given record that belong to the given related module
-func DoGetRelatedRecords(record string, module string, relatedModule string, queryParameters map[string]interface{}) ([]interface{}, error) {
+func (cbCtx *cbContext) DoGetRelatedRecords(record string, module string, relatedModule string, queryParameters map[string]interface{}) ([]interface{}, error) {
 	params, _ := json.Marshal(queryParameters)
 	v := url.Values{
 		"operation":       {"getRelatedRecords"},
-		"sessionName":     {cbConnection.sessionid},
+		"sessionName":     {cbCtx.cbConnection.sessionid},
 		"id":              {record},
 		"module":          {module},
 		"relatedModule":   {relatedModule},
 		"queryParameters": {string(params)},
 	}
-	_, dat, e := docbCall("POST", v)
+	_, dat, e := cbCtx.docbCall("POST", v)
 	if e == nil && dat["success"] == true {
 		rdo := dat["result"].(map[string]interface{})
 		return rdo["records"].([]interface{}), nil
@@ -383,15 +392,15 @@ func DoGetRelatedRecords(record string, module string, relatedModule string, que
 // DoSetRelated establishes a relation between records
 // param relateThisID string ID of record we want to be related with other records
 // param withTheseIds array of IDs to relate to the first parameter
-func DoSetRelated(relateThisID string, withTheseIds []string) (bool, error) {
+func (cbCtx *cbContext) DoSetRelated(relateThisID string, withTheseIds []string) (bool, error) {
 	params, _ := json.Marshal(withTheseIds)
 	v := url.Values{
 		"operation":      {"SetRelation"},
-		"sessionName":    {cbConnection.sessionid},
+		"sessionName":    {cbCtx.cbConnection.sessionid},
 		"relate_this_id": {relateThisID},
 		"with_these_ids": {string(params)},
 	}
-	_, dat, e := docbCall("POST", v)
+	_, dat, e := cbCtx.docbCall("POST", v)
 	if e == nil && dat["success"] == true {
 		return dat["result"].(bool), nil
 	}
@@ -403,15 +412,15 @@ func DoSetRelated(relateThisID string, withTheseIds []string) (bool, error) {
 }
 
 // DoLoginPage get HTML for the Login page
-func DoLoginPage(template string, language string, csrf string) (string, error) {
+func (cbCtx *cbContext) DoLoginPage(template string, language string, csrf string) (string, error) {
 	v := url.Values{
 		"operation":   {"getLoginPage"},
-		"sessionName": {cbConnection.sessionid},
+		"sessionName": {cbCtx.cbConnection.sessionid},
 		"template":    {template},
 		"language":    {language},
 		"csrf":        {csrf},
 	}
-	_, dat, e := docbCall("GET", v)
+	_, dat, e := cbCtx.docbCall("GET", v)
 	if e == nil && dat["success"] == true {
 		return dat["result"].(string), nil
 	}
@@ -424,7 +433,7 @@ func DoLoginPage(template string, language string, csrf string) (string, error) 
 
 ///////////////////////////////////////////////////////
 
-func docbCall(typeofcall string, params url.Values) (bool, map[string]interface{}, error) {
+func (cbCtx *cbContext) docbCall(typeofcall string, params url.Values) (bool, map[string]interface{}, error) {
 	empty := make(map[string]interface{})
 	var resp *http.Response
 	var err error
