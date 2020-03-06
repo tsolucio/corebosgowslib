@@ -67,6 +67,14 @@ func SetURL(cburl string) {
 	}
 }
 
+func (cbCtx *cbContext) GetSessionId() string {
+	return cbCtx.cbConnection.sessionid
+}
+
+func (cbCtx *cbContext) GetUserId() string {
+	return cbCtx.cbConnection.sessionid
+}
+
 func (cbCtx *cbContext) doChallenge(username string) (bool, error) {
 	v := url.Values{
 		"operation": {"getchallenge"},
