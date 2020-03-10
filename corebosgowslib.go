@@ -72,7 +72,7 @@ func (cbCtx *cbContext) GetSessionId() string {
 }
 
 func (cbCtx *cbContext) GetUserId() string {
-	return cbCtx.cbConnection.sessionid
+	return cbCtx.cbConnection.userid
 }
 
 func (cbCtx *cbContext) doChallenge(username string) (bool, error) {
