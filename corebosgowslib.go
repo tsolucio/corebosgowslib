@@ -67,6 +67,26 @@ func SetURL(cburl string) {
 	}
 }
 
+func (cbCtx *cbContext) GetServerTime() float64 {
+	return cbCtx.cbConnection.servertime
+}
+
+func (cbCtx *cbContext) GetExpireTime() string {
+	return cbCtx.cbConnection.expiretime
+}
+
+func (cbCtx *cbContext) GetToken() string {
+	return cbCtx.cbConnection.token
+}
+
+func (cbCtx *cbContext) GetServiceUser() string {
+	return cbCtx.cbConnection.serviceuser
+}
+
+func (cbCtx *cbContext) GetServiceKey() string {
+	return cbCtx.cbConnection.servicekey
+}
+
 func (cbCtx *cbContext) GetSessionId() string {
 	return cbCtx.cbConnection.sessionid
 }
